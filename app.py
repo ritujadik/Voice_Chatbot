@@ -4,18 +4,49 @@ from gtts import gTTS
 import base64
 import os
 import ollama
-
+import requests
 # --------------- Voice Output (TTS in browser) ---------------
+
+API_Key = st.secrets["openrouter"]["api_key"]
+
+def query_openrouter(message):
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {st.secrets['openrouter']['api_key']}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "mistralai/mistral-7b-instruct",
+        "messages": [{"role": "user", "content": message}]
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+
+    try:
+        response.raise_for_status()  # Raise an error if status != 200
+        json_data = response.json()
+        if "choices" in json_data:
+            return json_data["choices"][0]["message"]["content"]
+        else:
+            st.error("❌ Response received but no 'choices' key found.")
+            st.json(json_data)  # Show full response for debugging
+            return "⚠️ Unexpected response format from model."
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ Request failed: {e}")
+        return "⚠️ API request failed."
+
 def speak(text, lang="en"):
+    if not isinstance(text, str):
+        st.error("TTS Error: response is not a valid string.")
+        return
+
     tts = gTTS(text=text, lang=lang)
     tts.save("response.mp3")
 
-    # Encode audio file to base64
     with open("response.mp3", "rb") as f:
         audio_data = f.read()
         b64 = base64.b64encode(audio_data).decode()
 
-    # Play in-browser
     audio_html = f"""
         <audio autoplay controls>
             <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
@@ -57,23 +88,32 @@ def language_selector():
     return st.selectbox("Language", ["en", "hi", "fr", "de", "es"], index=0)
 
 def llm_selector():
-    try:
-        models = [model['name'] for model in ollama.list()['models']]
-        if not models:
-            st.warning("No models found. Run `ollama pull <model>` in your terminal.")
-            return "llama3"
-        return st.selectbox("Model", models, index=0)
-    except Exception as e:
-        st.error(f"Error loading models: {e}")
-        return "llama3"
+    return st.selectbox("Model", [
+        "mistralai/mistral-7b-instruct",
+        "openai/gpt-3.5-turbo",
+        "meta-llama/llama-3-8b-instruct"
+    ], index=0)
 
 # --------------- Simulated LLM (replace with real call) ---------------
-class OllamaLLM:
+class OpenRouterLLM:
     def chat(self, model, messages):
-        response = ollama.chat(model=model, messages=messages)
-        return response
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": "f Bearer {API_Key}",  # Your OpenRouter API key
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": model,
+            "messages": messages
+        }
+        response = requests.post(url, headers=headers, json=data)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print("❌ Error:", response.text)
+            return {"message": {"content": "Error fetching response."}}
 
-ol = OllamaLLM()
+ol = OpenRouterLLM()
 
 # --------------- Main App ---------------
 def main():
@@ -104,23 +144,30 @@ def main():
         print_chat_message(user_msg)
         chat_history.append(user_msg)
 
-        # Add system message for short response
-        response = ol.chat(model=model, messages=[
-            {"role": "system", "content": "Respond briefly (3-4 lines) unless asked for details."}
-        ] + chat_history)
+        # Call LLM
+        try:
+            if model.startswith("openrouter") or "mistral" in model.lower():
+                answer = query_openrouter(question)
+            else:
+                response = ol.chat(model=model, messages=[
+                    {"role": "system", "content": "Respond briefly (2-3 lines) unless asked for details."}
+                ] + chat_history)
+                answer = response["message"]["content"]
+        except Exception as e:
+            st.error(f"❌ Error getting response: {e}")
+            return
 
-        answer = response['message']['content']
         ai_msg = {"role": "assistant", "content": answer}
         print_chat_message(ai_msg)
         chat_history.append(ai_msg)
 
         # Speak response
         if st.session_state.get("last_answer") != answer:
-            if voice_output:
+            if voice_output and isinstance(answer, str):
                 speak(answer, lang=language)
             st.session_state["last_answer"] = answer
 
-        # Trim history to last 20
+        # Trim history to last 20 messages
         if len(chat_history) > 20:
             chat_history = chat_history[-20:]
 
