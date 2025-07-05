@@ -1,0 +1,5 @@
+streamlit
+ollama
+streamlit-mic-recorder
+gTTS
+playsound; platform_system=="Windows"
