@@ -2,4 +2,5 @@ streamlit
 ollama
 streamlit-mic-recorder
 gTTS
+deep-translator
 playsound; platform_system=="Windows"
