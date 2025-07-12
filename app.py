@@ -14,9 +14,6 @@ model = ["meta-llama/llama-3-8b-instruct", "mistralai/mistral-7b-instruct"]
 input_mode = "Type"
 
 
-
-
-
 def clean_mixed_language_text(text, target_lang="hi"):
     fallback_words = {
         "kRgbuddy": "Connaught Place",
@@ -136,7 +133,6 @@ def language_selector(model):
     model_lang_map = {
         "meta-llama/llama-3-8b-instruct": ["en", "hi", "fr", "de", "es"],
         "mistralai/mistral-7b-instruct": ["en", "hi", "fr", "de"],
-        "google/gemma-7b-it": ["en"]
     }
     supported = model_lang_map.get(model, ["en"])
     return st.selectbox("Answer Language", supported, index=0)
@@ -145,7 +141,6 @@ def llm_selector():
     return st.selectbox("Model", [
         "meta-llama/llama-3-8b-instruct",
         "mistralai/mistral-7b-instruct",
-        "google/gemma-7b-it"
     ], index=0)
 
 def get_language_name(code):
