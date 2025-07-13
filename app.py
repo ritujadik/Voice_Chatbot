@@ -141,7 +141,7 @@ def llm_selector():
     return st.selectbox("Model", [
         "meta-llama/llama-3-8b-instruct",
         "mistralai/mistral-7b-instruct",
-    ], index=0)
+    ], index=0,key="llm_selector")
 
 def get_language_name(code):
     return {
@@ -171,101 +171,93 @@ class OpenRouterLLM:
             return {"message": {"content": "Error fetching response."}}
 
 ol = OpenRouterLLM()
-
 def main():
     st.title("🗣️ Voice Chatbot")
 
     with st.sidebar:
-        model = llm_selector()
-        language = language_selector(model)
+        llm_model = llm_selector()
+        answer_lang = language_selector(llm_model)
+        input_mode = st.radio("Input Mode", ["Chat", "Voice"])
         voice_output = st.checkbox("🔊 Enable Voice Response", value=True)
-        input_mode = st.radio("Select Input Mode", ("🎙️ Voice", "⌨️ Type"))
 
         if st.button("🗑️ Clear Chat History"):
-            if "chat_history" in st.session_state:
-                st.session_state.chat_history[model] = []
+            st.session_state.chat_history[llm_model] = []
 
-    # Initialize chat history
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = {}
-    if model not in st.session_state.chat_history:
-        st.session_state.chat_history[model] = []
+    # Initialize session state
+    st.session_state.setdefault("chat_history", {})
+    st.session_state.chat_history.setdefault(llm_model, [])
+    chat_history = st.session_state.chat_history[llm_model]
 
-    chat_history = st.session_state.chat_history[model]
-
-    # Display chat history
+    # 🗨️ Show all chat messages first
     for msg in chat_history:
         print_chat_message(msg)
 
-    # Get input from user
+    # 🧠 Handle user input after messages (fixed input area)
     question = None
-    if input_mode == "🎙️ Voice":
-        st.write("🎤 Listening...")
-        question = record_voice(language="en")  # Always record in English
-    else:
-        user_input = st.text_input("Type your message:")
-        if st.button("Submit") and user_input:
-            question = user_input
+    with st.container():
+        if input_mode == "Chat":
+            question = st.chat_input("Type your message here...")
 
-    # If question exists, process it
+        elif input_mode == "Voice":
+            if "voice_input_ready" not in st.session_state:
+                st.session_state.voice_input_ready = False
+
+            if st.session_state.voice_input_ready:
+                voice_text = record_voice(language="en")
+                if voice_text:
+                    st.session_state.voice_input_ready = False
+                    question = voice_text
+                else:
+                    st.markdown("🎤 **Listening...**")
+            else:
+                if st.button("🎙️ Tap to Speak"):
+                    st.session_state.voice_input_ready = True
+
+    # 🧠 Process the message and respond
     if question:
-        user_msg = {"role": "user", "content": question}
-        print_chat_message(user_msg)
-        chat_history.append(user_msg)
+        chat_history.append({"role": "user", "content": question})
+        print_chat_message({"role": "user", "content": question})
+
+        lang_name = get_language_name(answer_lang)
+        system_prompt = {
+            "role": "system",
+            "content": (
+                "Answer ONLY in Hinglish (Hindi using English letters). Keep it short and casual."
+                if answer_lang == "hi"
+                else f"Respond only in {lang_name}. Translate and reply in 2–3 short lines."
+            )
+        }
 
         try:
-            output_language_name = get_language_name(language)
-
-            if language == "hi":
-                system_prompt = {
-                    "role": "system",
-                    "content": (
-                        "Answer ONLY in Hinglish (Hindi written using English letters). Do NOT use Hindi script. "
-                        "Do NOT mix with other languages like Spanish, French, or gibberish tokens. "
-                        "Avoid hallucinated or corrupted words like 'hathitग' or similar. "
-                        "Use short 2-3 line casual answers, in bullet points if needed.\n\n"
-                        "Examples:\n"
-                        "- Taj Mahal Agra mein hai\n"
-                        "- Agra ka Petha bahut famous hai\n"
-                        "- Fatehpur Sikri bhi nearby ek historical jagah hai"
-                    )
-                }
-            else:
-                system_prompt = {
-                    "role": "system",
-                    "content": (
-                        f"Respond only in {output_language_name}. "
-                        f"Translate user's English input to {output_language_name} and give a short, helpful reply in 2-3 lines. "
-                        f"Do not mix languages. Do not explain language mismatch."
-                    )
-                }
-
-            response = ol.chat(model=model, messages=[system_prompt] + chat_history)
-
+            response = ol.chat(model=llm_model, messages=[system_prompt] + chat_history)
             if "choices" in response and response["choices"]:
                 answer = response["choices"][0]["message"]["content"]
             else:
-                st.error("❌ Unexpected response format.")
-                st.json(response)
+                st.error("⚠️ Unexpected response format.")
                 return
-
         except Exception as e:
             st.error(f"❌ Error getting response: {e}")
             return
 
-        ai_msg = {"role": "assistant", "content": answer}
-        print_chat_message(ai_msg)
-        chat_history.append(ai_msg)
+        chat_history.append({"role": "assistant", "content": answer})
+        print_chat_message({"role": "assistant", "content": answer})
 
-        if voice_output and isinstance(answer, str):
-            speak(answer, lang=language)
+        if voice_output:
+            st.session_state["speak_text"] = answer
+            st.session_state["speak_lang"] = answer_lang
 
         if len(chat_history) > 20:
-            chat_history = chat_history[-20:]
+            st.session_state.chat_history[llm_model] = chat_history[-20:]
 
-        st.session_state.chat_history[model] = chat_history
 
 
 if __name__ == "__main__":
     main()
+
+    if "speak_text" in st.session_state:
+        st.markdown("---")
+        speak(
+            st.session_state.pop("speak_text"),
+            st.session_state.pop("speak_lang", "en")
+        )
 
